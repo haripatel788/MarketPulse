@@ -54,3 +54,25 @@ Response body:
 `model_mae` is the one-day holdout MAE (in dollars).  
 `model_mae_pct` is one-day holdout MAE in percent.  
 `baseline_mae` is the one-day MAE from a naive baseline (`tomorrow = today`).
+
+The values above are illustrative. Metrics are computed per request on that ticker's last 20% of history and are not a benchmark.
+
+## Evaluation
+
+`python -m benchmarks.run_benchmark` reuses the API's features, hyperparameters, and rollout, and compares the model with two baselines: `tomorrow = today` and "predict the training-window mean return". Results are written to `benchmarks/results/`.
+
+Results from the October 2026 run, using 20 large-cap tickers and Yahoo daily data:
+
+| Setup | Model MAE% | Naive MAE% | Tickers beating naive |
+|---|---|---|---|
+| API holdout (last 20% of 1,200 days) | 1.49 | 1.46 | 4 / 20 |
+| Walk-forward, 120 windows, Apr 2021 to Oct 2026 | 1.46 | 1.42 | 12 / 120 windows |
+| 5-day recursive rollout | 3.55 | 3.29 | 6 / 20 |
+
+The random forest does not beat either baseline on daily price error. The mean-return baseline performs about the same as the naive one, so this gap is not explained by drift.
+
+Sentiment is not a model input. It is applied after prediction as `return + SENTIMENT_RETURN_COEF × sentiment × volume_ratio`, with a fixed, untuned coefficient of 0.004. A test on `data/sentiment_cache.csv` (20 tickers, 2009–2020, 10,840 news days) found the following:
+
+- Sentiment correlates with same-day returns (rank IC 0.19) but not with next-day returns (rank IC 0.005, p = 0.59).
+- The fixed overlay increases error by 0.7%.
+- Using sentiment as model features changes error by +0.2%, which is not significant (p = 0.08).

@@ -96,6 +96,15 @@ MODEL_CACHE_TTL_SEC = int(os.getenv("MODEL_CACHE_TTL_SEC", "3600"))
 MODEL_CACHE_MAX_KEYS = int(os.getenv("MODEL_CACHE_MAX_KEYS", "24"))
 SENTIMENT_RETURN_COEF = float(os.getenv("SENTIMENT_RETURN_COEF", "0.004"))
 
+RF_PARAMS = {
+    "n_estimators": 300,
+    "random_state": 42,
+    "min_samples_leaf": 12,
+    "max_depth": 14,
+    "max_features": "sqrt",
+    "n_jobs": -1,
+}
+
 # In-memory model cache: symbol -> (trained_at_epoch, model, mae, mae_pct, baseline_mae, feature_cols)
 _model_cache: OrderedDict[str, tuple[float, RandomForestRegressor, float, float, float, list[str]]] = (
     OrderedDict()
@@ -288,14 +297,7 @@ def train_model(
     y = feature_df[target_cols]
     # Last 20% is a single temporal holdout (shuffle=False): no future rows in train.
     x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, shuffle=False)
-    params = {
-        "n_estimators": 300,
-        "random_state": 42,
-        "min_samples_leaf": 12,
-        "max_depth": 14,
-        "max_features": "sqrt",
-        "n_jobs": -1,
-    }
+    params = RF_PARAMS
     eval_model = RandomForestRegressor(**params)
     eval_model.fit(x_train, y_train)
     preds = np.asarray(eval_model.predict(x_test), dtype=float)
