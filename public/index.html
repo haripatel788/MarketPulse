@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MarketPulse — ML Stock Forecasting</title>
+  <title>MarketPulse — Volatility &amp; Price-Range Forecasts</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
@@ -329,6 +329,14 @@
       font-size: 9px;
       color: var(--text3);
     }
+    .range-note {
+      margin-top: 8px;
+      font-size: 11px;
+      color: var(--text3);
+      font-weight: 300;
+      line-height: 1.4;
+    }
+    .range-note:empty { display: none; }
 
     .run-btn {
       width: 100%;
@@ -559,8 +567,9 @@
     }
     .chart-svg {
       width: 100%;
-      height: 88px;
+      height: 220px;
       display: block;
+      overflow: visible;
     }
 
     .table-section {
@@ -621,6 +630,13 @@
       font-size: 12px;
       font-weight: 400;
       color: var(--text2);
+    }
+    .forecast-tbl td:nth-child(7),
+    .forecast-tbl td:nth-child(8) {
+      text-align: right;
+      font-size: 12px;
+      font-weight: 400;
+      color: var(--text3);
     }
     .tbl-num { color: var(--text3); font-size: 10px; }
     .tbl-day { color: var(--text3); }
@@ -807,7 +823,7 @@
 <body>
 
 <div class="ticker-bar">
-  <div class="ticker-label">INDICES</div>
+  <div class="ticker-label" title="Last price vs previous close, Yahoo Finance, refreshed every minute">MARKETS</div>
   <div class="ticker-scroll-wrap">
     <div class="ticker-scroll" id="tickerScroll"></div>
   </div>
@@ -828,7 +844,7 @@
   </div>
   <div class="masthead-main">
     <div class="brand">
-      <div class="brand-kicker">Machine Learning Forecasting Engine</div>
+      <div class="brand-kicker">Volatility &amp; Price-Range Forecasts</div>
       <div class="brand-name">Market<em>Pulse</em></div>
     </div>
     <div class="masthead-right">
@@ -867,9 +883,10 @@
         <div class="horizon-unit">days</div>
       </div>
       <input id="horizonRange" class="range-input" type="range" min="1" max="30" value="7" />
-      <div class="range-ticks">
+      <div class="range-ticks" id="rangeTicks">
         <span>1</span><span>7</span><span>14</span><span>21</span><span>30</span>
       </div>
+      <div class="range-note" id="rangeNote"></div>
     </div>
 
     <div class="sidebar-section">
@@ -1010,8 +1027,8 @@
       </div>
 
       <div class="chart-section">
-        <div class="chart-label">Price range (shaded: 80%)</div>
-        <svg class="chart-svg" id="chartSVG" viewBox="0 0 800 88" preserveAspectRatio="none"></svg>
+        <div class="chart-label">Price range · dark band 80% · light band 95% · dashed line is the last close (no direction forecast)</div>
+        <svg class="chart-svg" id="chartSVG"></svg>
       </div>
 
       <div class="table-section">
@@ -1025,6 +1042,8 @@
               <th>Expected move</th>
               <th style="text-align:right">Low (80%)</th>
               <th style="text-align:right">High (80%)</th>
+              <th style="text-align:right">Low (95%)</th>
+              <th style="text-align:right">High (95%)</th>
             </tr>
           </thead>
           <tbody id="forecastBody"></tbody>
@@ -1255,31 +1274,33 @@
     else el.textContent = 'Outside US regular session (ET)';
   })();
 
-  const TAPE = [
-    { sym: 'SPY', p: '542.18', c: '+3.21', pct: '+0.60%', up: true },
-    { sym: 'QQQ', p: '461.74', c: '-1.08', pct: '-0.23%', up: false },
-    { sym: 'AAPL', p: '252.96', c: '+1.23', pct: '+0.49%', up: true },
-    { sym: 'MSFT', p: '415.32', c: '-2.18', pct: '-0.52%', up: false },
-    { sym: 'NVDA', p: '876.54', c: '+12.4', pct: '+1.43%', up: true },
-    { sym: 'TSLA', p: '173.40', c: '-4.52', pct: '-2.54%', up: false },
-    { sym: 'AMZN', p: '196.18', c: '+0.87', pct: '+0.44%', up: true },
-    { sym: 'GOOGL', p: '171.90', c: '-1.10', pct: '-0.64%', up: false },
-    { sym: 'META', p: '586.22', c: '+7.34', pct: '+1.27%', up: true },
-    { sym: 'JPM', p: '248.75', c: '+1.56', pct: '+0.63%', up: true },
-    { sym: 'AMD', p: '108.32', c: '-3.20', pct: '-2.87%', up: false },
-    { sym: 'NFLX', p: '998.44', c: '+14.2', pct: '+1.44%', up: true },
-    { sym: 'DIA', p: '418.36', c: '+0.92', pct: '+0.22%', up: true },
-    { sym: 'IWM', p: '197.84', c: '-0.66', pct: '-0.33%', up: false },
-  ];
-  (function buildTape() {
+  async function loadTape() {
     const wrap = document.getElementById('tickerScroll');
-    [...TAPE, ...TAPE].forEach((t) => {
+    let quotes = [];
+    try {
+      const res = await fetch('/api/quotes');
+      if (res.ok) quotes = (await res.json()).quotes || [];
+    } catch { /* leave the tape empty and say so below */ }
+    wrap.innerHTML = '';
+    if (!quotes.length) {
       const el = document.createElement('div');
       el.className = 'ticker-item';
-      el.innerHTML = `<span class="sym">${t.sym}</span><span>${t.p}</span><span class="${t.up ? 'up' : 'dn'}">${t.c} (${t.pct})</span>`;
+      el.textContent = 'Live prices unavailable right now';
+      wrap.appendChild(el);
+      return;
+    }
+    const sign = (v) => (v >= 0 ? '+' : '');
+    [...quotes, ...quotes].forEach((q) => {
+      const up = q.change >= 0;
+      const el = document.createElement('div');
+      el.className = 'ticker-item';
+      el.innerHTML = `<span class="sym">${q.symbol}</span><span>${q.price.toFixed(2)}</span>`
+        + `<span class="${up ? 'up' : 'dn'}">${sign(q.change)}${q.change.toFixed(2)} (${sign(q.change_pct)}${q.change_pct.toFixed(2)}%)</span>`;
       wrap.appendChild(el);
     });
-  })();
+  }
+  loadTape();
+  setInterval(loadTape, 60000);
 
   function formatApiError(data, status) {
     if (!data) return `HTTP ${status}`;
@@ -1358,6 +1379,14 @@
     horizonNum.textContent = String(v);
     const tierLabel = accessToken && profile ? String(profile.tier || 'free') : 'guest';
     document.getElementById('modelMaxHorizonLabel').textContent = `${max} days (${tierLabel})`;
+
+    const ticks = max <= 10
+      ? Array.from({ length: max }, (_, i) => i + 1)
+      : [...new Set([0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(1 + f * (max - 1))))];
+    document.getElementById('rangeTicks').innerHTML = ticks.map((t) => `<span>${t}</span>`).join('');
+    document.getElementById('rangeNote').textContent = max < 30
+      ? (accessToken ? `Your plan allows up to ${max} days.` : `Guests: up to ${max} days. Sign in for longer horizons.`)
+      : '';
   }
 
   async function refreshProfile() {
@@ -1493,72 +1522,80 @@
     document.getElementById('stateResults').style.display = s === 'results' ? 'flex' : 'none';
   }
 
-  function drawChart(lastClose, lows, highs) {
+  let lastChartArgs = null;
+
+  function drawChart(lastClose, lows, highs, lows95, highs95, dates) {
+    lastChartArgs = [lastClose, lows, highs, lows95, highs95, dates];
     const svg = document.getElementById('chartSVG');
     svg.innerHTML = '';
-    const all = [lastClose, ...lows.map(() => lastClose)];
-    if (all.length < 2) return;
-    const mn = Math.min(lastClose, ...lows);
-    const mx = Math.max(lastClose, ...highs);
-    const pad = (mx - mn) * 0.12 || 2;
-    const lo = mn - pad;
-    const hi = mx + pad;
-    const W = 800;
-    const H = 88;
-    const px = (i) => (i / (all.length - 1)) * W;
-    const py = (v) => H - ((v - lo) / (hi - lo)) * (H - 8) - 4;
-    const pts = all.map((v, i) => `${px(i).toFixed(1)},${py(v).toFixed(1)}`).join(' ');
-    for (let i = 1; i < 4; i++) {
-      const yg = (H / 4) * i;
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.setAttribute('x1', '0');
-      line.setAttribute('x2', W);
-      line.setAttribute('y1', yg);
-      line.setAttribute('y2', yg);
-      line.setAttribute('stroke', '#d8d5ce');
-      line.setAttribute('stroke-width', '0.5');
-      svg.appendChild(line);
+    const n = lows.length;
+    if (!n) return;
+    const W = Math.max(svg.clientWidth, 320);
+    const H = svg.clientHeight || 220;
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    const padL = 64, padR = 112, padT = 14, padB = 26;
+    const mn = Math.min(lastClose, ...lows95);
+    const mx = Math.max(lastClose, ...highs95);
+    const span = (mx - mn) || lastClose * 0.02;
+    const lo = mn - span * 0.06;
+    const hi = mx + span * 0.06;
+    const px = (i) => padL + (i / n) * (W - padL - padR);
+    const py = (v) => padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB);
+    const NS = 'http://www.w3.org/2000/svg';
+    const add = (tag, attrs, text) => {
+      const el = document.createElementNS(NS, tag);
+      Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v));
+      if (text != null) el.textContent = text;
+      svg.appendChild(el);
+      return el;
+    };
+    const money = (v) => `$${v.toFixed(2)}`;
+    const font = { style: 'font-family: var(--mono); font-size: 10px', fill: '#8a877f' };
+
+    for (let k = 0; k <= 4; k++) {
+      const v = lo + (k / 4) * (hi - lo);
+      add('line', { x1: padL, x2: W - padR, y1: py(v), y2: py(v), stroke: '#e3e0d9', 'stroke-width': 1 });
+      add('text', { ...font, x: padL - 8, y: py(v) + 3, 'text-anchor': 'end' }, money(v));
     }
-    const sepX = px(0).toFixed(1);
-    const sep = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    sep.setAttribute('x1', sepX);
-    sep.setAttribute('x2', sepX);
-    sep.setAttribute('y1', '0');
-    sep.setAttribute('y2', H);
-    sep.setAttribute('stroke', '#aaa');
-    sep.setAttribute('stroke-width', '1');
-    sep.setAttribute('stroke-dasharray', '4,3');
-    svg.appendChild(sep);
-    const upper = [lastClose, ...highs].map((v, i) => `${px(i).toFixed(1)},${py(v).toFixed(1)}`);
-    const lower = [lastClose, ...lows].map((v, i) => `${px(i).toFixed(1)},${py(v).toFixed(1)}`).reverse();
-    const area = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-    area.setAttribute('points', [...upper, ...lower].join(' '));
-    area.setAttribute('fill', 'rgba(26,58,92,0.14)');
-    svg.appendChild(area);
-    const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-    line.setAttribute('points', pts);
-    line.setAttribute('fill', 'none');
-    line.setAttribute('stroke', '#1a3a5c');
-    line.setAttribute('stroke-width', '2');
-    line.setAttribute('stroke-linejoin', 'round');
-    svg.appendChild(line);
-    const d0 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    d0.setAttribute('cx', px(0).toFixed(1));
-    d0.setAttribute('cy', py(lastClose).toFixed(1));
-    d0.setAttribute('r', '4');
-    d0.setAttribute('fill', '#9a9790');
-    d0.setAttribute('stroke', 'white');
-    d0.setAttribute('stroke-width', '1.5');
-    svg.appendChild(d0);
-    const dn = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    dn.setAttribute('cx', px(all.length - 1).toFixed(1));
-    dn.setAttribute('cy', py(lastClose).toFixed(1));
-    dn.setAttribute('r', '5');
-    dn.setAttribute('fill', '#1a3a5c');
-    dn.setAttribute('stroke', 'white');
-    dn.setAttribute('stroke-width', '2');
-    svg.appendChild(dn);
+
+    const band = (los, his, fill) => {
+      const upper = [lastClose, ...his].map((v, i) => `${px(i)},${py(v)}`);
+      const lower = [lastClose, ...los].map((v, i) => `${px(i)},${py(v)}`).reverse();
+      add('polygon', { points: [...upper, ...lower].join(' '), fill });
+    };
+    band(lows95, highs95, 'rgba(26,58,92,0.08)');
+    band(lows, highs, 'rgba(26,58,92,0.20)');
+
+    add('line', {
+      x1: px(0), x2: px(n), y1: py(lastClose), y2: py(lastClose),
+      stroke: '#1a3a5c', 'stroke-width': 1.5, 'stroke-dasharray': '5,4',
+    });
+    add('circle', { cx: px(0), cy: py(lastClose), r: 4, fill: '#1a3a5c', stroke: 'white', 'stroke-width': 1.5 });
+
+    const endLabels = [
+      { v: highs95[n - 1], label: `95% ${money(highs95[n - 1])}`, color: '#8a877f' },
+      { v: highs[n - 1], label: `80% ${money(highs[n - 1])}`, color: '#1a3a5c' },
+      { v: lastClose, label: `Now ${money(lastClose)}`, color: '#1a3a5c' },
+      { v: lows[n - 1], label: `80% ${money(lows[n - 1])}`, color: '#1a3a5c' },
+      { v: lows95[n - 1], label: `95% ${money(lows95[n - 1])}`, color: '#8a877f' },
+    ];
+    let prevY = -Infinity;
+    endLabels.forEach((e) => {
+      const y = Math.max(py(e.v) + 3, prevY + 12);
+      prevY = y;
+      add('text', { ...font, fill: e.color, x: px(n) + 8, y }, e.label);
+    });
+
+    const dateLabel = (s) => new Date(`${s}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    add('text', { ...font, x: px(0), y: H - 6, 'text-anchor': 'start' }, 'Last close');
+    add('text', { ...font, x: px(n), y: H - 6, 'text-anchor': 'end' }, dateLabel(dates[n - 1]));
   }
+
+  window.addEventListener('resize', () => {
+    if (lastChartArgs && getComputedStyle(document.getElementById('stateResults')).display !== 'none') {
+      drawChart(...lastChartArgs);
+    }
+  });
 
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -1603,7 +1640,8 @@
       document.getElementById('resRange80').textContent = `${fmt(lows[n - 1])} – ${fmt(highs[n - 1])}`;
       document.getElementById('resRange95Label').textContent = `95% range · day ${n}`;
       document.getElementById('resRange95').textContent = `${fmt(lows95[n - 1])} – ${fmt(highs95[n - 1])}`;
-      drawChart(data.last_close, lows, highs);
+      showState('results');
+      drawChart(data.last_close, lows, highs, lows95, highs95, data.predicted_dates);
       document.getElementById('tableHeading').textContent = `${horizon}-day price range for ${data.symbol}`;
       const tbody = document.getElementById('forecastBody');
       tbody.innerHTML = '';
@@ -1613,6 +1651,8 @@
         const lo = lows[i] != null ? fmt(lows[i]) : '—';
         const hi = highs[i] != null ? fmt(highs[i]) : '—';
         const move = moves[i] != null ? `±${Number(moves[i]).toFixed(2)}%` : '—';
+        const lo95 = lows95[i] != null ? fmt(lows95[i]) : '—';
+        const hi95 = highs95[i] != null ? fmt(highs95[i]) : '—';
         const tr = document.createElement('tr');
         tr.style.animationDelay = `${Math.min(i * 0.04, 0.28)}s`;
         tr.innerHTML = `
@@ -1621,7 +1661,9 @@
           <td class="tbl-day">${DAYS[d.getDay()]}</td>
           <td>${move}</td>
           <td>${lo}</td>
-          <td>${hi}</td>`;
+          <td>${hi}</td>
+          <td>${lo95}</td>
+          <td>${hi95}</td>`;
         tbody.appendChild(tr);
       });
       showState('results');
