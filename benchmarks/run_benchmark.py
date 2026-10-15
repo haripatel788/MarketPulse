@@ -1,7 +1,8 @@
 """
 Offline benchmark for the MarketPulse forecaster.
 
-Reuses the exact feature pipeline, hyperparameters, and recursive rollout from app.main,
+Reuses the exact feature pipeline, hyperparameters, and recursive rollout of the retired
+random-forest forecaster (benchmarks/legacy_rf.py),
 and compares the random forest against two baselines on 1-day (and 5-day) price error:
   - naive:      tomorrow's close = today's close
   - train_mean: tomorrow's return = mean daily return of the training window
@@ -34,13 +35,13 @@ import requests
 from scipy import stats
 from sklearn.ensemble import RandomForestRegressor
 
-from app.main import (
+from app.main import standardize_dataframe
+from benchmarks.legacy_rf import (
     FEATURE_COLS,
     RF_PARAMS,
     SENTIMENT_RETURN_COEF,
     build_training_features,
     forecast_next_days,
-    standardize_dataframe,
 )
 
 logging.getLogger("app").setLevel(logging.WARNING)
@@ -265,8 +266,8 @@ def load_sentiment_for(sym: str, sent: pd.DataFrame, trading_dates: pd.Series) -
     return agg
 
 
-def exp_sentiment(refresh: bool, n_tickers: int) -> tuple[pd.DataFrame, dict]:
-    print("\n[4] Sentiment test on historical sentiment file (2009-2020)")
+def build_sentiment_panels(refresh: bool, n_tickers: int) -> list[pd.DataFrame]:
+    """Price features + aligned sentiment for the tickers with the most news days (2009-2020)."""
     sent = pd.read_csv(SENTIMENT_PATH, parse_dates=["date"])
     ranking = (sent.assign(nz=sent["daily_sentiment"] != 0).groupby("stock")["nz"].sum()
                .sort_values(ascending=False))
@@ -287,6 +288,12 @@ def exp_sentiment(refresh: bool, n_tickers: int) -> tuple[pd.DataFrame, dict]:
         feat["symbol"] = sym
         panels.append(feat)
     print(f"  tickers with price data: {[p['symbol'].iloc[0] for p in panels]}")
+    return panels
+
+
+def exp_sentiment(refresh: bool, n_tickers: int) -> tuple[pd.DataFrame, dict]:
+    print("\n[4] Sentiment test on historical sentiment file (2009-2020)")
+    panels = build_sentiment_panels(refresh, n_tickers)
 
     # Pooled tuned coefficient, fit only on training portions (target demeaned per ticker).
     xs, ys = [], []

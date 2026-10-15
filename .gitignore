@@ -9,3 +9,7 @@ logs/
 *.log
 
 benchmarks/price_cache/
+
+# Large per-day benchmark outputs (regenerate with benchmarks/vol_benchmark.py)
+benchmarks/results/*.csv.gz
+benchmarks/results/pool120/

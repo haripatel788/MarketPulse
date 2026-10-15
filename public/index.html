@@ -833,7 +833,7 @@
     </div>
     <div class="masthead-right">
       <div class="masthead-date" id="mastheadDate"></div>
-      <div class="masthead-edition">Random Forest · 1-day rollout · Groq</div>
+      <div class="masthead-edition">HAR volatility · calibrated 80% / 95% ranges</div>
     </div>
   </div>
 </div>
@@ -893,15 +893,15 @@
       <div class="model-rows">
         <div class="model-row">
           <span class="model-key">Algorithm</span>
-          <span class="model-val">Random Forest</span>
+          <span class="model-val">HAR volatility</span>
         </div>
         <div class="model-row">
-          <span class="model-key">Trees</span>
-          <span class="model-val">300 estimators</span>
+          <span class="model-key">Inputs</span>
+          <span class="model-val">1d / 5d / 22d range vol</span>
         </div>
         <div class="model-row">
-          <span class="model-key">Features</span>
-          <span class="model-val">27 price/volume</span>
+          <span class="model-key">Ranges</span>
+          <span class="model-val">Calibrated 80% / 95%</span>
         </div>
         <div class="model-row">
           <span class="model-key">Price data</span>
@@ -909,7 +909,7 @@
         </div>
         <div class="model-row">
           <span class="model-key">Sentiment</span>
-          <span class="model-val highlight">News + Groq LLM</span>
+          <span class="model-val">Not used (no next-day signal)</span>
         </div>
         <div class="model-row">
           <span class="model-key">Max horizon</span>
@@ -969,14 +969,14 @@
       <div class="empty-rule"></div>
       <div class="empty-headline">No forecast on record.</div>
       <div class="empty-deck">
-        Enter a ticker symbol on the left and choose a forecast horizon to generate a machine-learning price projection.
+        Enter a ticker symbol on the left and choose a horizon to see how far the price is likely to move.
       </div>
     </div>
 
     <div class="state-loading" id="stateLoading">
       <div class="loading-symbol" id="loadSymbol">—</div>
       <div class="loading-progress"><div class="loading-fill"></div></div>
-      <div class="loading-label">Fetching data · Training model · Scoring sentiment</div>
+      <div class="loading-label">Fetching data · Fitting volatility model</div>
     </div>
 
     <div class="state-results" id="stateResults">
@@ -993,24 +993,24 @@
 
       <div class="stat-strip">
         <div class="stat-cell">
-          <div class="stat-label">Model MAE</div>
-          <div class="stat-value" id="resMAE">—</div>
-          <div class="stat-sub" id="resMAEpct">—</div>
+          <div class="stat-label">Expected daily move</div>
+          <div class="stat-value" id="resDailyVol">—</div>
+          <div class="stat-sub">1 standard deviation, next session</div>
         </div>
         <div class="stat-cell">
-          <div class="stat-label">Baseline MAE</div>
-          <div class="stat-value" id="resBaseline">—</div>
-          <div class="stat-sub">Naïve (today = tomorrow)</div>
+          <div class="stat-label" id="resRange80Label">80% range</div>
+          <div class="stat-value" id="resRange80">—</div>
+          <div class="stat-sub">Holds the close about 4 times in 5</div>
         </div>
         <div class="stat-cell">
-          <div class="stat-label">vs. Baseline</div>
-          <div class="stat-value" id="resImprove">—</div>
-          <div class="stat-sub">Error improvement</div>
+          <div class="stat-label" id="resRange95Label">95% range</div>
+          <div class="stat-value" id="resRange95">—</div>
+          <div class="stat-sub">Holds the close about 19 times in 20</div>
         </div>
       </div>
 
       <div class="chart-section">
-        <div class="chart-label">Forecast trajectory</div>
+        <div class="chart-label">Price range (shaded: 80%)</div>
         <svg class="chart-svg" id="chartSVG" viewBox="0 0 800 88" preserveAspectRatio="none"></svg>
       </div>
 
@@ -1022,9 +1022,9 @@
               <th style="width:40px">#</th>
               <th>Date</th>
               <th>Day</th>
-              <th>Point est.</th>
-              <th style="text-align:right">Low (±MAE)</th>
-              <th style="text-align:right">High (±MAE)</th>
+              <th>Expected move</th>
+              <th style="text-align:right">Low (80%)</th>
+              <th style="text-align:right">High (80%)</th>
             </tr>
           </thead>
           <tbody id="forecastBody"></tbody>
@@ -1032,7 +1032,7 @@
       </div>
 
       <div class="disclaimer">
-        For informational purposes only. Not financial advice. Past model performance does not guarantee future accuracy. Low/High columns use the one-day holdout MAE as a simple symmetric band (not a calibrated confidence interval). Forecasts chain one-day model predictions forward with optional news sentiment as a small return adjustment.
+        For informational purposes only. Not financial advice. This tool does not predict direction. In testing, no model beat "tomorrow = today" for the price itself. It forecasts how far the price is likely to move, using a per-stock HAR volatility model. In a one-time test on 474 S&amp;P 500 stocks it was not used to build, the 80% ranges held the actual close 81–82% of the time at 1, 5, and 20 days.
       </div>
 
     </div>
@@ -1493,13 +1493,13 @@
     document.getElementById('stateResults').style.display = s === 'results' ? 'flex' : 'none';
   }
 
-  function drawChart(prices, lastClose) {
+  function drawChart(lastClose, lows, highs) {
     const svg = document.getElementById('chartSVG');
     svg.innerHTML = '';
-    const all = [lastClose, ...prices];
+    const all = [lastClose, ...lows.map(() => lastClose)];
     if (all.length < 2) return;
-    const mn = Math.min(...all);
-    const mx = Math.max(...all);
+    const mn = Math.min(lastClose, ...lows);
+    const mx = Math.max(lastClose, ...highs);
     const pad = (mx - mn) * 0.12 || 2;
     const lo = mn - pad;
     const hi = mx + pad;
@@ -1529,9 +1529,11 @@
     sep.setAttribute('stroke-width', '1');
     sep.setAttribute('stroke-dasharray', '4,3');
     svg.appendChild(sep);
+    const upper = [lastClose, ...highs].map((v, i) => `${px(i).toFixed(1)},${py(v).toFixed(1)}`);
+    const lower = [lastClose, ...lows].map((v, i) => `${px(i).toFixed(1)},${py(v).toFixed(1)}`).reverse();
     const area = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-    area.setAttribute('points', `0,${H} ${pts} ${W},${H}`);
-    area.setAttribute('fill', 'rgba(26,58,92,0.07)');
+    area.setAttribute('points', [...upper, ...lower].join(' '));
+    area.setAttribute('fill', 'rgba(26,58,92,0.14)');
     svg.appendChild(area);
     const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
     line.setAttribute('points', pts);
@@ -1550,7 +1552,7 @@
     svg.appendChild(d0);
     const dn = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     dn.setAttribute('cx', px(all.length - 1).toFixed(1));
-    dn.setAttribute('cy', py(prices[prices.length - 1]).toFixed(1));
+    dn.setAttribute('cy', py(lastClose).toFixed(1));
     dn.setAttribute('r', '5');
     dn.setAttribute('fill', '#1a3a5c');
     dn.setAttribute('stroke', 'white');
@@ -1589,40 +1591,35 @@
       document.getElementById('resTicker').textContent = data.symbol;
       document.getElementById('resClose').textContent = `$${data.last_close.toFixed(2)}`;
       document.getElementById('resSource').textContent = data.data_source;
-      const mae = data.model_mae;
-      const base = data.baseline_mae;
-      const imp = (base - mae) / base * 100;
-      const maeEl = document.getElementById('resMAE');
-      maeEl.textContent = `$${mae.toFixed(2)}`;
-      maeEl.className = 'stat-value' + (mae < base ? ' positive' : ' negative');
-      document.getElementById('resMAEpct').textContent = `${data.model_mae_pct.toFixed(2)}% of price`;
-      document.getElementById('resBaseline').textContent = `$${base.toFixed(2)}`;
-      const impEl = document.getElementById('resImprove');
-      impEl.textContent = imp >= 0 ? `↓ ${imp.toFixed(1)}%` : `↑ ${Math.abs(imp).toFixed(1)}%`;
-      impEl.className = 'stat-value' + (imp >= 0 ? ' positive' : ' negative');
-      drawChart(data.predicted_prices, data.last_close);
-      document.getElementById('tableHeading').textContent = `${horizon}-day price forecast for ${data.symbol}`;
-      const tbody = document.getElementById('forecastBody');
-      tbody.innerHTML = '';
       const lows = data.predicted_price_low || [];
       const highs = data.predicted_price_high || [];
+      const lows95 = data.predicted_price_low_95 || [];
+      const highs95 = data.predicted_price_high_95 || [];
+      const moves = data.expected_move_pct || [];
+      const n = data.predicted_dates.length;
+      const fmt = (v) => `$${Number(v).toFixed(2)}`;
+      document.getElementById('resDailyVol').textContent = `±${data.daily_vol_pct.toFixed(2)}%`;
+      document.getElementById('resRange80Label').textContent = `80% range · day ${n}`;
+      document.getElementById('resRange80').textContent = `${fmt(lows[n - 1])} – ${fmt(highs[n - 1])}`;
+      document.getElementById('resRange95Label').textContent = `95% range · day ${n}`;
+      document.getElementById('resRange95').textContent = `${fmt(lows95[n - 1])} – ${fmt(highs95[n - 1])}`;
+      drawChart(data.last_close, lows, highs);
+      document.getElementById('tableHeading').textContent = `${horizon}-day price range for ${data.symbol}`;
+      const tbody = document.getElementById('forecastBody');
+      tbody.innerHTML = '';
       data.predicted_dates.forEach((dt, i) => {
-        const price = data.predicted_prices[i];
-        const prev = i === 0 ? data.last_close : data.predicted_prices[i - 1];
-        const chg = price - prev;
-        const pct = (chg / prev * 100).toFixed(2);
-        const up = chg >= 0;
         const d = new Date(`${dt}T12:00:00`);
         const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-        const lo = lows[i] != null ? `$${Number(lows[i]).toFixed(2)}` : '—';
-        const hi = highs[i] != null ? `$${Number(highs[i]).toFixed(2)}` : '—';
+        const lo = lows[i] != null ? fmt(lows[i]) : '—';
+        const hi = highs[i] != null ? fmt(highs[i]) : '—';
+        const move = moves[i] != null ? `±${Number(moves[i]).toFixed(2)}%` : '—';
         const tr = document.createElement('tr');
         tr.style.animationDelay = `${Math.min(i * 0.04, 0.28)}s`;
         tr.innerHTML = `
           <td class="tbl-num">${String(i + 1).padStart(2, '0')}</td>
           <td>${label}</td>
           <td class="tbl-day">${DAYS[d.getDay()]}</td>
-          <td>$${price.toFixed(2)}<span class="delta ${up ? 'up' : 'dn'}">${up ? '▲' : '▼'} ${Math.abs(pct)}%</span></td>
+          <td>${move}</td>
           <td>${lo}</td>
           <td>${hi}</td>`;
         tbody.appendChild(tr);

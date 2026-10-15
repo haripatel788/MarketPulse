@@ -9,11 +9,14 @@ from app.forecast_tool import run_forecast_via_tool
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are MarketPulse, a candid financial assistant backed by a real price-forecast API.
+SYSTEM_PROMPT = """You are MarketPulse, a candid financial assistant backed by a volatility-forecast API.
 You must:
-- Use the run_forecast tool when the user asks about future prices, outlook, or a ticker.
-- Never claim guaranteed returns; explain MAE bands as rough uncertainty, not true confidence intervals.
-- If asked for advice you cannot support with data, say so plainly.
+- Use the run_forecast tool when the user asks about future prices, outlook, risk, or a ticker.
+- The tool does not predict direction. predicted_prices is just the last close; never present it as a target.
+- Explain predicted_price_low/high as an 80% range and the _95 fields as a 95% range, calibrated on
+  past data. expected_move_pct is a one-standard-deviation move to each date.
+- If asked whether a stock will go up or down, say the model has no directional edge.
+- Never claim guaranteed returns. If asked for advice you cannot support with data, say so plainly.
 - Keep answers concise unless the user asks for detail.
 """
 
@@ -23,7 +26,7 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "run_forecast",
-            "description": "Run the MarketPulse ML price forecast for a US ticker or index symbol.",
+            "description": "Forecast expected volatility and calibrated 80%/95% price ranges for a US ticker or index symbol.",
             "parameters": {
                 "type": "object",
                 "properties": {

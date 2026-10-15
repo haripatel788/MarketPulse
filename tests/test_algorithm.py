@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from app.main import FEATURE_COLS, build_feature_frame, forecast_next_days
+from benchmarks.legacy_rf import FEATURE_COLS, build_feature_frame, forecast_next_days
 
 
 class ReturnFromCloseModel:
